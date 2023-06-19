@@ -165,7 +165,7 @@ class CustomDataset(Dataset):
                                   int(np.floor((896-width)/2)),
                                   int(np.ceil((896-height)/2)),
                                   int(np.ceil(896-width)/2)),
-                                 padding_mode='reflect')
+                                 padding_mode='constant')
             image = pad(image)
             image = self.transform(image=np.array(image))['image']
             #my_transforms.extend(self.transform)
@@ -270,7 +270,7 @@ criterion = nn.CrossEntropyLoss(weight=class_weights)
 scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-4, patience=100)
 # -
 
-num_epochs = 200
+num_epochs = 100
 epoch_loss_list = []
 epoch_lr = []
 model.train()
@@ -330,7 +330,7 @@ for idx, image_file in enumerate(images_files):
                           int(np.floor((896-width)/2)),
                           int(np.ceil((896-height)/2)),
                           int(np.ceil(896-width)/2)),
-                          padding_mode='reflect')
+                          padding_mode='constant')
     image = pad(image)
     data = transform(image=np.array(image))['image'].to(device)
     # Add Batch dimension
@@ -346,9 +346,19 @@ print(f'Number of unlabelled images: {len(test_ids)}')
 
 output_df
 
+output_df[output_df['malignant'] >= 0]
+
 output_df['malignant'].value_counts()
 
 # save output
+output_df = output_df.sort_values('id')
 output_df.to_csv(data_dir / 'predictions.csv', index=False)
 
+# acc: 0.54
+second_pred = pd.read_csv(data_dir / 'second_submission_predictions.csv')
+print(second_pred['malignant'].value_counts())
+second_pred[second_pred['malignant'] >= 0]
 
+# acc: 0.61
+third_pred = pd.read_csv(data_dir / 'thrid_submission_predictions')
+third_pred[third_pred['malignant'] >= 0]
