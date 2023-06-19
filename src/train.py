@@ -114,9 +114,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # read in the data
 data_dir = Path("/content/data")
 
-# +
 # unzip data
-# # ! unzip -q /content/data/oxml-carinoma-classification.zip -d /content/data/
+# ! unzip -q /content/data/oxml-carinoma-classification.zip -d /content/data/
 
 # +
 labels_file = data_dir / 'labels.csv'
@@ -138,15 +137,16 @@ data_df['malignant'].value_counts()
 # Define any image transformations if needed
 # transform = torchvision.transforms.Compose([...])
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.RandomHorizontalFlip(0.25), # augment the data
-    transforms.RandomVerticalFlip(0.25),
+    transforms.Resize((512, 512)),
+    transforms.RandomHorizontalFlip(0.2), # augment the data
+    transforms.RandomVerticalFlip(0.2),
+    #transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
     transforms.ToTensor(),
     # Rescale pixel to [-1, 1] values.
     # The first tuple (0.5, 0.5, 0.5) is the mean for all three
     # channels and the second (0.5, 0.5, 0.5) is the standard
     # deviation for all three channels.
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 # Create the custom dataset
@@ -178,7 +178,7 @@ class Resnet_fc(nn.Module):
                             #nn.ReLU(),
                             #nn.Linear(7, 3))
     self.fc = nn.Sequential(nn.Flatten(),
-                            nn.Linear(2048*7*7, n_classes))
+                            nn.Linear(2048*16*16, n_classes))
 
   def forward(self, x):
     x = self.model(x)
@@ -186,18 +186,16 @@ class Resnet_fc(nn.Module):
     return x
 
 
-# +
-# alternative uglier version
-#model = resnet50(pretrained=True, progress=False, key="MoCoV2")
-#model.fc = nn.Linear(16*2048*77, num_classes)
-#model.to(device)
+# Size of the last layer from the pretrained model
+bla = pre_trained_model(sample["image"].to(device))
+bla.shape
 
 # +
 # Create a last fully connected layer to match the number of classes
 # Note: the number of of nodes was determined by looking at the network
 
 num_classes = 3
-pre_trained_model = resnet50(pretrained=True, progress=False, key="MoCoV2")
+pre_trained_model = resnet50(pretrained=True, progress=False, key="BT")
 
 # Freeze the parameters in the pre-trained network
 for param in pre_trained_model.parameters():
@@ -259,8 +257,6 @@ plt.plot(epoch_lr)
 plt.title("Learning rate", fontsize=20)
 plt.xlabel("Epochs", fontsize=16)
 plt.ylabel("Loss", fontsize=16)
-
-epoch_lr
 
 # # Get the test labels
 
