@@ -19,11 +19,16 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 import torch
 import torch.nn as nn
+from torch.utils.data import WeightedRandomSampler
 from torch.optim import lr_scheduler
 import torch.optim as optim
 from torchvision.transforms import transforms
 from torchvision.models.resnet import Bottleneck, ResNet
 import matplotlib.pyplot as plt
+from torchvision.transforms.functional import get_image_size
+import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
+import numpy as np
 
 def get_lr(optimizer):
   for param_group in optimizer.param_groups:
@@ -114,9 +119,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # read in the data
 data_dir = Path("/content/data")
 
-# +
 # unzip data
-# # ! unzip -q /content/data/oxml-carinoma-classification.zip -d /content/data/
+# ! unzip -q /content/data/oxml-carinoma-classification.zip -d /content/data/
 
 # +
 labels_file = data_dir / 'labels.csv'
@@ -135,18 +139,57 @@ data_df['malignant'].value_counts()
 
 # # Load data
 
+class_weights = 1/data_df['malignant'].value_counts()
+sample_weights = [class_weights[i] for i in data_df['malignant']]
+class_weights
+
+
+class CustomDataset(Dataset):
+    def __init__(self, data_dir, data_df, transform=None):
+        self.data_dir = data_dir
+        self.labels_df = data_df
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.labels_df)
+
+    def __getitem__(self, idx):
+        img_path = self.data_dir / f"img_{self.labels_df.iloc[idx]['id']}.png"
+        image = Image.open(img_path).convert('RGB')
+        height, width = get_image_size(image)
+
+        label = self.labels_df.iloc[idx]['malignant']
+
+        if self.transform:
+            pad = transforms.Pad((int(np.floor((896-height)/2)),
+                                  int(np.floor((896-width)/2)),
+                                  int(np.ceil((896-height)/2)),
+                                  int(np.ceil(896-width)/2)),
+                                 padding_mode='reflect')
+            image = pad(image)
+            image = self.transform(image=np.array(image))['image']
+            #my_transforms.extend(self.transform)
+            #image = self._apply_transforms(image, my_transforms, h, w)
+        sample = {'image': image,
+                  'label': label,
+                  'id': self.labels_df.iloc[idx]['id']}
+        return sample
+
+
 # Define any image transformations if needed
-# transform = torchvision.transforms.Compose([...])
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.RandomHorizontalFlip(0.25), # augment the data
-    transforms.RandomVerticalFlip(0.25),
-    transforms.ToTensor(),
+transform = A.Compose([
+    #transforms.Pad((896, 896)),
+    A.HorizontalFlip(p=0.25), # augment the data
+    A.VerticalFlip(p=0.25),
+    A.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    #A.GaussNoise(var_limit=(0,.3), p=.2),
+    ToTensorV2(),
     # Rescale pixel to [-1, 1] values.
     # The first tuple (0.5, 0.5, 0.5) is the mean for all three
     # channels and the second (0.5, 0.5, 0.5) is the standard
     # deviation for all three channels.
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    #transforms.ColorJitter(),
+    #transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.5, 0.5)),
 ])
 
 # Create the custom dataset
@@ -154,15 +197,26 @@ dataset = CustomDataset(data_dir, data_df, transform)
 
 # Create the data loader
 batch_size = 16
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+#sampler = WeightedRandomSampler(weights=sample_weights,
+#                                num_samples=3*len(data_df['malignant']),
+#                                replacement=True)
+#dataloader = DataLoader(dataset, batch_size=batch_size, sampler=sampler)
+dataloader = DataLoader(dataset, batch_size=batch_size)
 
 sample = next(iter(dataloader))
 print(f"Len dataloader: {len(dataloader)}")
 print(f"Image shape: {sample['image'].shape} Labels shape: {sample['label'].shape}")
 
-show_imgs([sample["image"][1].permute(1, 2, 0), sample["image"][2].permute(1, 2, 0)],
+show_imgs([sample["image"][1].permute(1, 2, 0),
+           sample["image"][2].permute(1, 2, 0),
+           sample["image"][3].permute(1, 2, 0),
+           sample["image"][4].permute(1, 2, 0),
+           ],
           captions=[f"Label: {sample['label'][1]} - id: {sample['id'][1]}",
-                    f"Label: {sample['label'][2]} - id: {sample['id'][2]}"])
+                    f"Label: {sample['label'][2]} - id: {sample['id'][2]}",
+                    f"Label: {sample['label'][3]} - id: {sample['id'][2]}",
+                    f"Label: {sample['label'][4]} - id: {sample['id'][2]}",
+                    ])
 
 
 # # Get a pre-trained model
@@ -174,23 +228,16 @@ class Resnet_fc(nn.Module):
     super(Resnet_fc, self).__init__()
     n_classes = 3
     self.model = pre_trained_model
-    #self.fc = nn.Sequential(nn.Linear(2048*7, 7),
-                            #nn.ReLU(),
-                            #nn.Linear(7, 3))
+# Size of the layer if using 226, 226
+#    self.fc = nn.Sequential(nn.Flatten(),
+#                            nn.Linear(2048*7*7, n_classes))
     self.fc = nn.Sequential(nn.Flatten(),
-                            nn.Linear(2048*7*7, n_classes))
-
+                             nn.Linear(2048*28*28, n_classes))
   def forward(self, x):
     x = self.model(x)
     x = self.fc(x)
     return x
 
-
-# +
-# alternative uglier version
-#model = resnet50(pretrained=True, progress=False, key="MoCoV2")
-#model.fc = nn.Linear(16*2048*77, num_classes)
-#model.to(device)
 
 # +
 # Create a last fully connected layer to match the number of classes
@@ -217,9 +264,10 @@ optimizer = optim.SGD(model.fc.parameters(), lr=0.01, momentum=0.9)
 weights = [1/n_healthy, 1/n_benign, 1/n_malign]
 class_weights = torch.FloatTensor(weights).to(device)
 criterion = nn.CrossEntropyLoss(weight=class_weights)
+#criterion = nn.CrossEntropyLoss()
 
 # Decay LR by a factor of 0.1 every 7 epochs
-scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-6, patience=50)
+scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-4, patience=100)
 # -
 
 num_epochs = 200
@@ -260,8 +308,6 @@ plt.title("Learning rate", fontsize=20)
 plt.xlabel("Epochs", fontsize=16)
 plt.ylabel("Loss", fontsize=16)
 
-epoch_lr
-
 # # Get the test labels
 
 # +
@@ -279,7 +325,14 @@ for idx, image_file in enumerate(images_files):
 
     # Load image
     image = Image.open(image_file).convert('RGB')
-    data = transform(image).to(device)
+    height, width = get_image_size(image)
+    pad = transforms.Pad((int(np.floor((896-height)/2)),
+                          int(np.floor((896-width)/2)),
+                          int(np.ceil((896-height)/2)),
+                          int(np.ceil(896-width)/2)),
+                          padding_mode='reflect')
+    image = pad(image)
+    data = transform(image=np.array(image))['image'].to(device)
     # Add Batch dimension
     data = torch.unsqueeze(data, 0)
 
