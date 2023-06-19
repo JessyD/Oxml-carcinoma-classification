@@ -13,6 +13,8 @@
 #     name: python3
 # ---
 
+# !pip install timm
+
 from pathlib import Path
 import pandas as pd
 from PIL import Image
@@ -23,6 +25,7 @@ from torch.optim import lr_scheduler
 import torch.optim as optim
 from torchvision.transforms import transforms
 from torchvision.models.resnet import Bottleneck, ResNet
+from timm.models.vision_transformer import VisionTransformer
 import matplotlib.pyplot as plt
 
 def get_lr(optimizer):
@@ -61,37 +64,21 @@ def show_imgs(ims, captions=None):
 
 
 # +
-class ResNetTrunk(ResNet):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        del self.fc  # remove FC layer
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        return x
-
-
 def get_pretrained_url(key):
     URL_PREFIX = "https://github.com/lunit-io/benchmark-ssl-pathology/releases/download/pretrained-weights"
     model_zoo_registry = {
-        "BT": "bt_rn50_ep200.torch",
-        "MoCoV2": "mocov2_rn50_ep200.torch",
-        "SwAV": "swav_rn50_ep200.torch",
+        "DINO_p16": "dino_vit_small_patch16_ep200.torch",
+        "DINO_p8": "dino_vit_small_patch8_ep200.torch",
     }
     pretrained_url = f"{URL_PREFIX}/{model_zoo_registry.get(key)}"
     return pretrained_url
 
 
-def resnet50(pretrained, progress, key, **kwargs):
-    model = ResNetTrunk(Bottleneck, [3, 4, 6, 3], **kwargs)
+def vit_small(pretrained, progress, key, **kwargs):
+    patch_size = kwargs.get("patch_size", 16)
+    model = VisionTransformer(
+        img_size=224, patch_size=patch_size, embed_dim=384, num_heads=6, num_classes=0
+    )
     if pretrained:
         pretrained_url = get_pretrained_url(key)
         verbose = model.load_state_dict(
@@ -99,7 +86,6 @@ def resnet50(pretrained, progress, key, **kwargs):
         )
         print(verbose)
     return model
-
 
 
 # +
@@ -137,7 +123,7 @@ data_df['malignant'].value_counts()
 # Define any image transformations if needed
 # transform = torchvision.transforms.Compose([...])
 transform = transforms.Compose([
-    transforms.Resize((512, 512)),
+    transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(0.2), # augment the data
     transforms.RandomVerticalFlip(0.2),
     #transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
@@ -178,7 +164,7 @@ class Resnet_fc(nn.Module):
                             #nn.ReLU(),
                             #nn.Linear(7, 3))
     self.fc = nn.Sequential(nn.Flatten(),
-                            nn.Linear(2048*16*16, n_classes))
+                            nn.Linear(384, n_classes))
 
   def forward(self, x):
     x = self.model(x)
@@ -195,7 +181,7 @@ bla.shape
 # Note: the number of of nodes was determined by looking at the network
 
 num_classes = 3
-pre_trained_model = resnet50(pretrained=True, progress=False, key="BT")
+pre_trained_model = vit_small(pretrained=True, progress=False, key="DINO_p16", patch_size=16)
 
 # Freeze the parameters in the pre-trained network
 for param in pre_trained_model.parameters():
@@ -291,7 +277,18 @@ output_df
 
 output_df['malignant'].value_counts()
 
+output_df[output_df['malignant'] >= 0]['id'].to_list()
+
 # save output
 output_df.to_csv(data_dir / 'predictions.csv', index=False)
+
+second_pred = pd.read_csv(data_dir / 'second_submission_predictions.csv')
+print(second_pred['malignant'].value_counts())
+second_pred[second_pred['malignant'] >= 0]
+
+
+# acc: 0.61
+third_pred = pd.read_csv(data_dir / 'first_submission_predictions.csv')
+third_pred[third_pred['malignant'] >= 0]
 
 
